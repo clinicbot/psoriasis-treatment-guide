@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>בחירת טיפול בפסוריאזיס ארטריטיס</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f8ff;
+      padding: 20px;
+      direction: rtl;
+    }
+
+    .loader {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-size: 24px;
+      color: #1a3d6d;
+    }
+
+    .hidden { display: none; }
+
+    h2 { text-align: center; color: #1a3d6d; }
+    .container { max-width: 1000px; margin: auto; background: #fff; padding: 20px; border-radius: 10px; }
+
+    .group { margin-bottom: 20px; }
+    .group h3 { margin-bottom: 10px; color: #1a3d6d; font-size: 20px; border-bottom: 1px solid #ccc; }
+    .checkbox-line { display: block; margin: 5px 0; }
+    label { display: inline-flex; align-items: center; gap: 8px; }
+
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 30px; overflow-x: auto; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background-color: #e8f0fe; }
+    .red { color: red; font-weight: bold; }
+    .green { color: green; font-weight: bold; }
+    .selected-med { background-color: #d0e4ff !important; }
+
+    .param-list { margin-top: 20px; }
+    ul { list-style-type: none; padding: 0; }
+    li { transition: all 0.2s ease; }
+    li.red { color: red; }
+    li.green { color: green; }
+
+    @media (max-width: 600px) {
+      body { padding: 10px; font-size: 16px; }
+      .container { padding: 10px; }
+      table { font-size: 14px; }
+      button { width: 100%; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="loader" id="loading">טוען נתונים...</div>
+
+  <div class="container hidden" id="main">
+    <h2>מדריך בחירת טיפול לפסוריאזיס ארטריטיס</h2>
+    <div id="checkboxes"></div>
+
+    <button onclick="calculate()">חשב המלצות</button>
+
+    <div class="param-list">
+      <h3>פרמטרים פעילים:</h3>
+      <ul id="activeParams"></ul>
+    </div>
+
+    <table id="results" style="display:none">
+      <thead>
+        <tr>
+          <th>תרופה</th>
+          <th>ציון סופי</th>
+          <th>כמות התאמות</th>
+          <th>סכום משוקלל</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    let data = [];
+    let medNames = new Set();
+    let activeParams = [];
+
+    async function loadData() {
+      try {
+        const res = await fetch("https://script.google.com/macros/s/AKfycbzpnXBiPLFWTMRgTnTwt0cOatCERpxXoI86_k1TwzSyynBAmVNjndDq2qnjBFeL3iSSJQ/exec");
+        data = await res.json();
+        data.forEach(p => Object.keys(p.medications).forEach(med => medNames.add(med)));
+        renderGroupedCheckboxes();
+
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("main").classList.remove("hidden");
+      } catch (e) {
+        document.getElementById("loading").textContent = "שגיאה בטעינת הנתונים.";
+      }
+    }
+
+    function renderGroupedCheckboxes() {
+      const container = document.getElementById("checkboxes");
+      container.innerHTML = "";
+
+      const grouped = {};
+      data.forEach((p, idx) => {
+        if (!grouped[p.group]) grouped[p.group] = [];
+        grouped[p.group].push({ ...p, index: idx });
+      });
+
+      Object.entries(grouped).forEach(([groupName, params]) => {
+        const groupDiv = document.createElement("div");
+        groupDiv.className = "group";
+
+        const heading = document.createElement("h3");
+        heading.textContent = groupName || "ללא קבוצה";
+        groupDiv.appendChild(heading);
+
+        params.forEach(p => {
+          const label = document.createElement("label");
+          label.className = "checkbox-line";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = p.index;
+          label.appendChild(checkbox);
+          label.append(" " + p.parameter);
+          groupDiv.appendChild(label);
+        });
+
+        container.appendChild(groupDiv);
+      });
+    }
+
+    function calculate() {
+      const selected = Array.from(document.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
+      activeParams = selected.map(i => ({ ...data[i], active: 1 }));
+
+      const ul = document.getElementById("activeParams");
+      ul.innerHTML = "";
+      activeParams.forEach((param, i) => {
+        const li = document.createElement("li");
+        li.textContent = param.parameter;
+        ul.appendChild(li);
+        param._liRef = li;
+      });
+
+      let results = [];
+
+      medNames.forEach(med => {
+        let scores = activeParams.map(p => p.medications[med]).filter(s => s !== undefined);
+        let finalScore = null;
+        let isContraindicated = scores.some(s => s < 0);
+        if (scores.length === 0) return;
+        finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
+
+        let countPositive = activeParams.filter(p => p.medications[med] > 0).length;
+        let weightedSum = activeParams.reduce((sum, p) => {
+          let s = p.medications[med];
+          return sum + (s > 0 ? s * p.weight : 0);
+        }, 0);
+
+        let masterScore = (finalScore < 0) ? finalScore : countPositive + weightedSum / 100000;
+
+        results.push({
+          med,
+          finalScore,
+          countPositive,
+          weightedSum,
+          masterScore,
+          isContraindicated
+        });
+      });
+
+      results.sort((a, b) => b.masterScore - a.masterScore);
+
+      const table = document.getElementById("results");
+      const tbody = table.querySelector("tbody");
+      tbody.innerHTML = "";
+
+      results.forEach(r => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td class="${r.isContraindicated ? 'red' : ''}">${r.med}</td>
+          <td class="${r.isContraindicated ? 'red' : ''}">${r.finalScore}</td>
+          <td>${r.countPositive}</td>
+          <td>${r.weightedSum.toFixed(2)}</td>
+        `;
+        row.style.cursor = "pointer";
+        row.onclick = () => highlightParameters(r.med);
+        tbody.appendChild(row);
+      });
+
+      table.style.display = "table";
+    }
+
+    function highlightParameters(med) {
+      document.querySelectorAll("#results tbody tr").forEach(row => {
+        row.classList.remove("selected-med");
+      });
+
+      const rows = document.querySelectorAll("#results tbody tr");
+      rows.forEach(row => {
+        if (row.cells[0].textContent === med) {
+          row.classList.add("selected-med");
+        }
+      });
+
+      activeParams.forEach(p => {
+        const li = p._liRef;
+        li.classList.remove("red", "green");
+        const score = p.medications[med];
+        if (score > 0) li.classList.add("green");
+        else if (score < 0) li.classList.add("red");
+      });
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
