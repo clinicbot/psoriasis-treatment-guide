@@ -39,6 +39,7 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      margin: 5px;
     }
 
     table { width: 100%; border-collapse: collapse; margin-top: 30px; overflow-x: auto; }
@@ -70,6 +71,7 @@
     <div id="checkboxes"></div>
 
     <button onclick="calculate()">חשב המלצות</button>
+    <button onclick="clearSelection()">נקה בחירה</button>
 
     <div class="param-list">
       <h3>פרמטרים פעילים:</h3>
@@ -93,16 +95,23 @@
     let data = [];
     let medNames = new Set();
     let activeParams = [];
+    let noArthritisIndex = null;
 
     async function loadData() {
       try {
         const res = await fetch("https://script.google.com/macros/s/AKfycbzpnXBiPLFWTMRgTnTwt0cOatCERpxXoI86_k1TwzSyynBAmVNjndDq2qnjBFeL3iSSJQ/exec");
         data = await res.json();
-        data.forEach(p => Object.keys(p.medications).forEach(med => medNames.add(med)));
+        data.forEach((p, i) => {
+          Object.keys(p.medications).forEach(med => medNames.add(med));
+          if (p.parameter.trim() === "No arthritis") noArthritisIndex = i;
+        });
         renderGroupedCheckboxes();
 
         document.getElementById("loading").classList.add("hidden");
         document.getElementById("main").classList.remove("hidden");
+
+        // select "No arthritis" by default
+        document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
       } catch (e) {
         document.getElementById("loading").textContent = "שגיאה בטעינת הנתונים.";
       }
@@ -132,6 +141,25 @@
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
           checkbox.value = p.index;
+          checkbox.dataset.group = p.group;
+
+          // logic for unchecking/selecting "No arthritis"
+          checkbox.addEventListener("change", () => {
+            const psaGroupBoxes = document.querySelectorAll('input[data-group="PSA clasification"]');
+            const noArthritisBox = document.querySelector(`input[value="${noArthritisIndex}"]`);
+
+            if (p.index == noArthritisIndex && checkbox.checked) {
+              psaGroupBoxes.forEach(box => {
+                if (parseInt(box.value) !== noArthritisIndex) box.checked = false;
+              });
+            } else if (p.group === "PSA clasification" && checkbox.checked) {
+              noArthritisBox.checked = false;
+            } else if (p.group === "PSA clasification" && !checkbox.checked) {
+              const anyChecked = Array.from(psaGroupBoxes).some(box => parseInt(box.value) !== noArthritisIndex && box.checked);
+              if (!anyChecked) noArthritisBox.checked = true;
+            }
+          });
+
           label.appendChild(checkbox);
           label.append(" " + p.parameter);
           groupDiv.appendChild(label);
@@ -158,27 +186,18 @@
 
       medNames.forEach(med => {
         let scores = activeParams.map(p => p.medications[med]).filter(s => s !== undefined);
-        let finalScore = null;
-        let isContraindicated = scores.some(s => s < 0);
         if (scores.length === 0) return;
-        finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
 
-        let countPositive = activeParams.filter(p => p.medications[med] > 0).length;
-        let weightedSum = activeParams.reduce((sum, p) => {
-          let s = p.medications[med];
+        const isContraindicated = scores.some(s => s < 0);
+        const finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
+        const countPositive = activeParams.filter(p => p.medications[med] > 0).length;
+        const weightedSum = activeParams.reduce((sum, p) => {
+          const s = p.medications[med];
           return sum + (s > 0 ? s * p.weight : 0);
         }, 0);
+        const masterScore = (finalScore < 0) ? finalScore : countPositive + weightedSum / 100000;
 
-        let masterScore = (finalScore < 0) ? finalScore : countPositive + weightedSum / 100000;
-
-        results.push({
-          med,
-          finalScore,
-          countPositive,
-          weightedSum,
-          masterScore,
-          isContraindicated
-        });
+        results.push({ med, finalScore, countPositive, weightedSum, masterScore, isContraindicated });
       });
 
       results.sort((a, b) => b.masterScore - a.masterScore);
@@ -204,9 +223,7 @@
     }
 
     function highlightParameters(med) {
-      document.querySelectorAll("#results tbody tr").forEach(row => {
-        row.classList.remove("selected-med");
-      });
+      document.querySelectorAll("#results tbody tr").forEach(row => row.classList.remove("selected-med"));
 
       const rows = document.querySelectorAll("#results tbody tr");
       rows.forEach(row => {
@@ -222,6 +239,15 @@
         if (score > 0) li.classList.add("green");
         else if (score < 0) li.classList.add("red");
       });
+    }
+
+    function clearSelection() {
+      document.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+      if (noArthritisIndex !== null) {
+        document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
+      }
+      document.getElementById("activeParams").innerHTML = "";
+      document.getElementById("results").style.display = "none";
     }
 
     loadData();
