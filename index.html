@@ -5,6 +5,7 @@
   <title>בחירת טיפול בפסוריאזיס </title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    /* your existing CSS remains unchanged */
     body {
       font-family: Arial, sans-serif;
       background: #f0f8ff;
@@ -55,6 +56,11 @@
     li.red { color: red; }
     li.green { color: green; }
 
+    canvas {
+      margin-top: 40px;
+      max-width: 100%;
+    }
+
     @media (max-width: 600px) {
       body { padding: 10px; font-size: 16px; }
       .container { padding: 10px; }
@@ -89,38 +95,30 @@
       </thead>
       <tbody></tbody>
     </table>
+
+    <canvas id="chartCanvas"></canvas>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    let data = [];
-    let medNames = new Set();
-    let activeParams = [];
-    let noArthritisIndex = null;
+    let data = [], medNames = new Set(), activeParams = [], noArthritisIndex = null, chartInstance;
 
     async function loadData() {
-      try {
-        const res = await fetch("https://script.google.com/macros/s/AKfycbzpnXBiPLFWTMRgTnTwt0cOatCERpxXoI86_k1TwzSyynBAmVNjndDq2qnjBFeL3iSSJQ/exec");
-        data = await res.json();
-        data.forEach((p, i) => {
-          Object.keys(p.medications).forEach(med => medNames.add(med));
-          if (p.parameter.trim() === "No arthritis") noArthritisIndex = i;
-        });
-        renderGroupedCheckboxes();
-
-        document.getElementById("loading").classList.add("hidden");
-        document.getElementById("main").classList.remove("hidden");
-
-        // select "No arthritis" by default
-        document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
-      } catch (e) {
-        document.getElementById("loading").textContent = "שגיאה בטעינת הנתונים.";
-      }
+      const res = await fetch("https://script.google.com/macros/s/AKfycbzpnXBiPLFWTMRgTnTwt0cOatCERpxXoI86_k1TwzSyynBAmVNjndDq2qnjBFeL3iSSJQ/exec");
+      data = await res.json();
+      data.forEach((p, i) => {
+        Object.keys(p.medications).forEach(med => medNames.add(med));
+        if (p.parameter.trim() === "No arthritis") noArthritisIndex = i;
+      });
+      renderGroupedCheckboxes();
+      document.getElementById("loading").classList.add("hidden");
+      document.getElementById("main").classList.remove("hidden");
+      document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
     }
 
     function renderGroupedCheckboxes() {
       const container = document.getElementById("checkboxes");
       container.innerHTML = "";
-
       const grouped = {};
       data.forEach((p, idx) => {
         if (!grouped[p.group]) grouped[p.group] = [];
@@ -130,7 +128,6 @@
       Object.entries(grouped).forEach(([groupName, params]) => {
         const groupDiv = document.createElement("div");
         groupDiv.className = "group";
-
         const heading = document.createElement("h3");
         heading.textContent = groupName || "ללא קבוצה";
         groupDiv.appendChild(heading);
@@ -143,20 +140,16 @@
           checkbox.value = p.index;
           checkbox.dataset.group = p.group;
 
-          // logic for unchecking/selecting "No arthritis"
           checkbox.addEventListener("change", () => {
-            const psaGroupBoxes = document.querySelectorAll('input[data-group="PSA clasification"]');
-            const noArthritisBox = document.querySelector(`input[value="${noArthritisIndex}"]`);
-
+            const psaBoxes = document.querySelectorAll('input[data-group="PSA clasification"]');
+            const noArthBox = document.querySelector(`input[value="${noArthritisIndex}"]`);
             if (p.index == noArthritisIndex && checkbox.checked) {
-              psaGroupBoxes.forEach(box => {
-                if (parseInt(box.value) !== noArthritisIndex) box.checked = false;
-              });
+              psaBoxes.forEach(box => { if (parseInt(box.value) !== noArthritisIndex) box.checked = false; });
             } else if (p.group === "PSA clasification" && checkbox.checked) {
-              noArthritisBox.checked = false;
+              noArthBox.checked = false;
             } else if (p.group === "PSA clasification" && !checkbox.checked) {
-              const anyChecked = Array.from(psaGroupBoxes).some(box => parseInt(box.value) !== noArthritisIndex && box.checked);
-              if (!anyChecked) noArthritisBox.checked = true;
+              const anyChecked = Array.from(psaBoxes).some(box => parseInt(box.value) !== noArthritisIndex && box.checked);
+              if (!anyChecked) noArthBox.checked = true;
             }
           });
 
@@ -175,19 +168,17 @@
 
       const ul = document.getElementById("activeParams");
       ul.innerHTML = "";
-      activeParams.forEach((param, i) => {
+      activeParams.forEach(p => {
         const li = document.createElement("li");
-        li.textContent = param.parameter;
+        li.textContent = p.parameter;
         ul.appendChild(li);
-        param._liRef = li;
+        p._liRef = li;
       });
 
-      let results = [];
-
+      const results = [];
       medNames.forEach(med => {
-        let scores = activeParams.map(p => p.medications[med]).filter(s => s !== undefined);
+        const scores = activeParams.map(p => p.medications[med]).filter(s => s !== undefined);
         if (scores.length === 0) return;
-
         const isContraindicated = scores.some(s => s < 0);
         const finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
         const countPositive = activeParams.filter(p => p.medications[med] > 0).length;
@@ -196,7 +187,6 @@
           return sum + (s > 0 ? s * p.weight : 0);
         }, 0);
         const masterScore = (finalScore < 0) ? finalScore : countPositive + weightedSum / 100000;
-
         results.push({ med, finalScore, countPositive, weightedSum, masterScore, isContraindicated });
       });
 
@@ -205,7 +195,6 @@
       const table = document.getElementById("results");
       const tbody = table.querySelector("tbody");
       tbody.innerHTML = "";
-
       results.forEach(r => {
         const row = document.createElement("tr");
         row.innerHTML = `
@@ -214,22 +203,52 @@
           <td>${r.countPositive}</td>
           <td>${r.weightedSum.toFixed(2)}</td>
         `;
-        row.style.cursor = "pointer";
         row.onclick = () => highlightParameters(r.med);
         tbody.appendChild(row);
       });
-
       table.style.display = "table";
+
+      drawChart(results);
+    }
+
+    function drawChart(results) {
+      const ctx = document.getElementById("chartCanvas").getContext("2d");
+      const labels = results.map(r => r.med);
+      const dataValues = results.map(r => r.isContraindicated ? -5 : r.weightedSum);
+      const bgColors = results.map(r => r.isContraindicated ? 'rgba(255, 99, 132, 0.8)' : 'rgba(54, 162, 235, 0.8)');
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Weighted Score',
+            data: dataValues,
+            backgroundColor: bgColors
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          scales: {
+            x: {
+              beginAtZero: true,
+              title: { display: true, text: 'Weighted Score' }
+            }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
     }
 
     function highlightParameters(med) {
       document.querySelectorAll("#results tbody tr").forEach(row => row.classList.remove("selected-med"));
-
-      const rows = document.querySelectorAll("#results tbody tr");
-      rows.forEach(row => {
-        if (row.cells[0].textContent === med) {
-          row.classList.add("selected-med");
-        }
+      document.querySelectorAll("#results tbody tr").forEach(row => {
+        if (row.cells[0].textContent === med) row.classList.add("selected-med");
       });
 
       activeParams.forEach(p => {
@@ -248,6 +267,8 @@
       }
       document.getElementById("activeParams").innerHTML = "";
       document.getElementById("results").style.display = "none";
+      const ctx = document.getElementById("chartCanvas").getContext("2d");
+      if (chartInstance) chartInstance.destroy();
     }
 
     loadData();
