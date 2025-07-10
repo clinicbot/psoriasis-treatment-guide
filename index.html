@@ -27,7 +27,16 @@
     .container { max-width: 1000px; margin: auto; background: #fff; padding: 20px; border-radius: 10px; }
 
     .group { margin-bottom: 20px; }
-    .group h3 { margin-bottom: 10px; color: #1a3d6d; font-size: 20px; border-bottom: 1px solid #ccc; }
+    .group h3 {
+      margin: 5px 0;
+      color: #1a3d6d;
+      font-size: 18px;
+      cursor: pointer;
+      background: #e8f0fe;
+      padding: 5px;
+      border-radius: 5px;
+    }
+
     .checkbox-line { display: block; margin: 5px 0; }
     label { display: inline-flex; align-items: center; gap: 8px; }
 
@@ -61,6 +70,21 @@
       margin-top: 30px;
     }
 
+    .toggle-controls {
+      margin: 10px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    #searchParam {
+      padding: 6px;
+      font-size: 16px;
+      width: 100%;
+      max-width: 300px;
+    }
+
     @media (max-width: 600px) {
       body { padding: 10px; font-size: 16px; }
       .container { padding: 10px; }
@@ -74,10 +98,16 @@
 
   <div class="container hidden" id="main">
     <h2>מדריך בחירת טיפול לפסוריאזיס</h2>
+
+    <div class="toggle-controls">
+      <button onclick="toggleAllGroups()">📂 פתח הכל / סגור הכל</button>
+      <input type="text" id="searchParam" placeholder="חפש פרמטר...">
+      <button onclick="clearSelection()">נקה בחירה</button>
+    </div>
+
     <div id="checkboxes"></div>
 
     <button onclick="calculate()">חשב המלצות</button>
-    <button onclick="clearSelection()">נקה בחירה</button>
 
     <div class="param-list">
       <h3>פרמטרים פעילים:</h3>
@@ -108,6 +138,7 @@
     let activeParams = [];
     let noArthritisIndex = null;
     let chartInstance = null;
+    let allCollapsed = true;
 
     async function loadData() {
       const res = await fetch("https://script.google.com/macros/s/AKfycbzpnXBiPLFWTMRgTnTwt0cOatCERpxXoI86_k1TwzSyynBAmVNjndDq2qnjBFeL3iSSJQ/exec");
@@ -135,9 +166,18 @@
       Object.entries(grouped).forEach(([groupName, params]) => {
         const groupDiv = document.createElement("div");
         groupDiv.className = "group";
+
         const heading = document.createElement("h3");
         heading.textContent = groupName || "ללא קבוצה";
+        heading.addEventListener("click", () => {
+          const section = groupDiv.querySelector(".checkboxes");
+          section.style.display = section.style.display === "none" ? "block" : "none";
+        });
         groupDiv.appendChild(heading);
+
+        const section = document.createElement("div");
+        section.className = "checkboxes";
+        section.style.display = "none";
 
         params.forEach(p => {
           const label = document.createElement("label");
@@ -165,11 +205,56 @@
 
           label.appendChild(checkbox);
           label.append(" " + p.parameter);
-          groupDiv.appendChild(label);
+          section.appendChild(label);
         });
 
+        groupDiv.appendChild(section);
         container.appendChild(groupDiv);
       });
+
+      document.getElementById("searchParam").addEventListener("input", filterParams);
+    }
+
+    function toggleAllGroups() {
+      const sections = document.querySelectorAll(".group .checkboxes");
+      allCollapsed = !allCollapsed;
+      sections.forEach(s => s.style.display = allCollapsed ? "none" : "block");
+    }
+
+    function filterParams() {
+      const search = this.value.trim().toLowerCase();
+      const groups = document.querySelectorAll(".group");
+      groups.forEach(group => {
+        let hasVisible = false;
+        const section = group.querySelector(".checkboxes");
+        const labels = section.querySelectorAll("label");
+        labels.forEach(label => {
+          const text = label.textContent.trim().toLowerCase();
+          const visible = text.includes(search);
+          label.style.display = visible ? "block" : "none";
+          if (visible) hasVisible = true;
+        });
+        if (search) {
+          group.style.display = hasVisible ? "block" : "none";
+          section.style.display = hasVisible ? "block" : "none";
+        } else {
+          group.style.display = "block";
+          section.style.display = "none";
+        }
+      });
+    }
+
+    function clearSelection() {
+      document.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+      document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
+      document.getElementById("activeParams").innerHTML = "";
+      document.getElementById("results").style.display = "none";
+      document.getElementById("chartSection").classList.add("hidden");
+
+      // Reset search
+      const searchBox = document.getElementById("searchParam");
+      searchBox.value = "";
+      filterParams.call(searchBox);
     }
 
     function calculate() {
@@ -239,14 +324,6 @@
       });
     }
 
-    function clearSelection() {
-      document.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
-      document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
-      document.getElementById("activeParams").innerHTML = "";
-      document.getElementById("results").style.display = "none";
-      document.getElementById("chartSection").classList.add("hidden");
-    }
-
     function drawChart(results) {
       const labels = results.map(r => r.med);
       const scores = results.map(r => r.isContraindicated ? -5 : r.weightedSum);
@@ -273,20 +350,11 @@
           scales: {
             x: {
               beginAtZero: true,
-              title: {
-                display: true,
-                text: 'Score'
-              }
+              title: { display: true, text: 'Score' }
             },
-            y: {
-              ticks: {
-                autoSkip: false
-              }
-            }
+            y: { ticks: { autoSkip: false } }
           },
-          plugins: {
-            legend: { display: false }
-          }
+          plugins: { legend: { display: false } }
         }
       });
 
