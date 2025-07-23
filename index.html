@@ -145,7 +145,7 @@
       data = await res.json();
       data.forEach((p, i) => {
         Object.keys(p.medications).forEach(med => medNames.add(med));
-        if (p.parameter.trim() === "No arthritis") noArthritisIndex = i;
+        if (p.parameter.trim().includes("No arthritis")) noArthritisIndex = i;
       });
       renderGroupedCheckboxes();
       document.getElementById("loading").classList.add("hidden");
