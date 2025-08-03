@@ -133,6 +133,11 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
+    function debugLog(msg) {
+	  const el = document.getElementById("debug");
+	  el.textContent += msg + "\n";
+	}
+
     let data = [];
     let medNames = new Set();
     let activeParams = [];
@@ -258,71 +263,136 @@
     }
 
     function calculate() {
-      const selected = Array.from(document.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
-      activeParams = selected.map(i => ({ ...data[i], active: 1 }));
+	  const selected = Array.from(document.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
+	  activeParams = selected.map(i => ({ ...data[i], active: 1 }));
 
-      const ul = document.getElementById("activeParams");
-      ul.innerHTML = "";
-      activeParams.forEach((param) => {
-        const li = document.createElement("li");
-        li.textContent = param.parameter;
-        ul.appendChild(li);
-        param._liRef = li;
-      });
+	  const scoringParams = activeParams.filter(p => !(p.group && p.group.includes("Treatment failure")));
+	  const treatmentFailureParams = activeParams.filter(p => p.group && p.group.includes("Treatment failure"));
 
-      let results = [];
-      medNames.forEach(med => {
-        const scores = activeParams.map(p => p.medications[med]).filter(s => s !== undefined);
-        if (scores.length === 0) return;
 
-        const isContraindicated = scores.some(s => s < 0);
-        const finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
-        const countPositive = activeParams.filter(p => p.medications[med] > 0).length;
-        const weightedSum = activeParams.reduce((sum, p) => {
-          const s = p.medications[med];
-          return sum + (s > 0 ? s * p.weight : 0);
-        }, 0);
-        const masterScore = (finalScore < 0) ? finalScore : countPositive + weightedSum / 100000;
+	  const ul = document.getElementById("activeParams");
+	  ul.innerHTML = "";
+	  activeParams.forEach((param) => {
+		const li = document.createElement("li");
+		li.textContent = param.parameter;
+		ul.appendChild(li);
+		param._liRef = li;
+	  });
 
-        results.push({ med, finalScore, countPositive, weightedSum, masterScore, isContraindicated });
-      });
+	  let results = [];
 
-      results.sort((a, b) => b.masterScore - a.masterScore);
+	  medNames.forEach(med => {
+		  const scores = scoringParams.map(p => p.medications[med]).filter(s => s !== undefined);
+		  if (scores.length === 0) return;
 
-      const tbody = document.querySelector("#results tbody");
-      tbody.innerHTML = "";
-      results.forEach(r => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td class="${r.isContraindicated ? 'red' : ''}">${r.med}</td>
-          <td class="${r.isContraindicated ? 'red' : ''}">${r.finalScore}</td>
-          <td>${r.countPositive}</td>
-          <td>${r.weightedSum.toFixed(2)}</td>
-        `;
-        row.onclick = () => highlightParameters(r.med);
-        tbody.appendChild(row);
-      });
+		  let isContraindicated = scores.some(s => s < 0);
+		  let finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
 
-      document.getElementById("results").style.display = "table";
-      drawChart(results);
-    }
+		  treatmentFailureParams.forEach(p => {
+			const val = p.medications[med];
+			debugLog(`🧪 ${p.parameter} affects ${med} → ${val}`);
+		  });
+
+		  // Rule #1: if any treatment failure param = -1 → medication is contraindicated
+		  const failed = treatmentFailureParams.some(p => p.medications[med] === -1);
+		  if (failed) {
+			isContraindicated = true;
+			finalScore = -1;
+		  }
+
+		  const countPositive = scoringParams.filter(p => p.medications[med] > 0).length;
+
+		  let weightedSum = scoringParams.reduce((sum, p) => {
+			const s = p.medications[med];
+			return sum + (s > 0 ? s * p.weight : 0);
+		  }, 0);
+
+		  // Rule #2: apply treatment failure multiplier(s) to weightedSum
+		  if (finalScore >= 0) {
+			const multipliers = treatmentFailureParams
+			  .map(p => Number(p.medications[med]))
+			  .filter(val => !isNaN(val) && val > 0 && val < 1);
+
+			if (multipliers.length > 1) {
+			  finalScore = -1;
+			  isContraindicated = true;
+			  debugLog(`❌ ${med}: multiple treatment failure multipliers → weightedSum = -1`);
+			} else if (multipliers.length === 1) {
+			  const m = multipliers[0];
+			  weightedSum *= m;
+			  debugLog(`✅ ${med}: weightedSum multiplied by ${m} → ${weightedSum.toFixed(2)}`);
+			}
+		  }
+          if (isNaN(weightedSum) || isNaN(finalScore)) {
+		    console.error(`❗ Invalid score for ${med}: final=${finalScore}, weighted=${weightedSum}`);
+		  }
+
+
+		  results.push({ med, finalScore, countPositive, weightedSum,  isContraindicated });
+		  
+
+		});
+
+
+        console.log(`🔢 Total medications scored: ${results.length}`);
+
+		results.sort((a, b) => {
+		  if (a.finalScore === -1 && b.finalScore !== -1) return 1;
+		  if (a.finalScore !== -1 && b.finalScore === -1) return -1;
+		  return b.weightedSum - a.weightedSum;
+		});
+
+
+	  const tbody = document.querySelector("#results tbody");
+	  tbody.innerHTML = "";
+	  
+	  results.forEach(r => {
+		const row = document.createElement("tr");
+		row.innerHTML = `
+		  <td class="${r.isContraindicated ? 'red' : ''}">${r.med}</td>
+		  <td class="${r.isContraindicated ? 'red' : ''}">${r.finalScore}</td>
+		  <td>${r.countPositive}</td>
+		  <td>${r.weightedSum.toFixed(2)}</td>
+
+		`;
+		row.onclick = () => highlightParameters(r.med);
+		tbody.appendChild(row);
+	  });
+
+	  document.getElementById("results").style.display = "table";
+	  drawChart(results);
+
+	  // Here you can apply your custom rules using activeParams, including those from "Treatment failure"
+	  // Example:
+	  // const treatmentFailureParams = activeParams.filter(p => p.group && p.group.includes("Treatment failure"));
+	}
+
 
     function highlightParameters(med) {
-      document.querySelectorAll("#results tbody tr").forEach(row => row.classList.remove("selected-med"));
-      document.querySelectorAll("#results tbody tr").forEach(row => {
-        if (row.cells[0].textContent === med) {
-          row.classList.add("selected-med");
-        }
-      });
+	  document.querySelectorAll("#results tbody tr").forEach(row => row.classList.remove("selected-med"));
+	  document.querySelectorAll("#results tbody tr").forEach(row => {
+		if (row.cells[0].textContent === med) {
+		  row.classList.add("selected-med");
+		}
+	  });
 
-      activeParams.forEach(p => {
-        const li = p._liRef;
-        li.classList.remove("red", "green");
-        const score = p.medications[med];
-        if (score > 0) li.classList.add("green");
-        else if (score < 0) li.classList.add("red");
-      });
-    }
+	  activeParams.forEach(p => {
+		const li = p._liRef;
+		li.classList.remove("red", "green");
+		const score = p.medications[med];
+
+		const isMultiplier = p.group && p.group.includes("Treatment failure") && score > 0 && score < 1;
+		const isContra = score < 0;
+
+		if (typeof score === 'number' && score > 0 && !isMultiplier) {
+		  li.classList.add("green");
+		} else if (isMultiplier || isContra) {
+		  li.classList.add("red");
+		}
+	  });
+	}
+
+
 
     function drawChart(results) {
       const labels = results.map(r => r.med);
@@ -363,5 +433,8 @@
 
     loadData();
   </script>
+<pre id="debug" style="background:#eee; padding:10px; font-size:12px; max-height:200px; overflow:auto;"></pre>
+
 </body>
 </html>
+
