@@ -157,68 +157,102 @@
       document.getElementById("main").classList.remove("hidden");
       document.querySelector(`input[value="${noArthritisIndex}"]`).checked = true;
     }
+	function getMutualExclusionTag(paramText) {
+	  const match = paramText.match(/\[([^\]]+)\]/);  // Finds anything in [ ]
+	  return match ? match[1].trim() : null;
+	}
 
-    function renderGroupedCheckboxes() {
-      const container = document.getElementById("checkboxes");
-      container.innerHTML = "";
-      const grouped = {};
+	function renderGroupedCheckboxes() {
+	  const container = document.getElementById("checkboxes");
+	  container.innerHTML = "";
+	  const grouped = {};
 
-      data.forEach((p, idx) => {
-        if (!grouped[p.group]) grouped[p.group] = [];
-        grouped[p.group].push({ ...p, index: idx });
-      });
+	  data.forEach((p, idx) => {
+		if (!grouped[p.group]) grouped[p.group] = [];
+		grouped[p.group].push({ ...p, index: idx });
+	  });
 
-      Object.entries(grouped).forEach(([groupName, params]) => {
-        const groupDiv = document.createElement("div");
-        groupDiv.className = "group";
+	  Object.entries(grouped).forEach(([groupName, params]) => {
+		const groupDiv = document.createElement("div");
+		groupDiv.className = "group";
 
-        const heading = document.createElement("h3");
-        heading.textContent = groupName || "ללא קבוצה";
-        heading.addEventListener("click", () => {
-          const section = groupDiv.querySelector(".checkboxes");
-          section.style.display = section.style.display === "none" ? "block" : "none";
-        });
-        groupDiv.appendChild(heading);
+		const heading = document.createElement("h3");
+		const cleanGroupName = (groupName || "ללא קבוצה").replace(/\*/g, "");
+		heading.textContent = cleanGroupName;
+		heading.addEventListener("click", () => {
+		  const section = groupDiv.querySelector(".checkboxes");
+		  section.style.display = section.style.display === "none" ? "block" : "none";
+		});
+		groupDiv.appendChild(heading);
 
-        const section = document.createElement("div");
-        section.className = "checkboxes";
-        section.style.display = "none";
+		const section = document.createElement("div");
+		section.className = "checkboxes";
+		section.style.display = "none";
 
-        params.forEach(p => {
-          const label = document.createElement("label");
-          label.className = "checkbox-line";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.value = p.index;
-          checkbox.dataset.group = p.group;
+		params.forEach(p => {
+		  const label = document.createElement("label");
+		  label.className = "checkbox-line";
+		  const checkbox = document.createElement("input");
+		  checkbox.type = "checkbox";
+		  checkbox.value = p.index;
+		  checkbox.dataset.group = p.group;
 
-          checkbox.addEventListener("change", () => {
-            const psaGroupBoxes = document.querySelectorAll('input[data-group="PSA clasification"]');
-            const noArthritisBox = document.querySelector(`input[value="${noArthritisIndex}"]`);
+		  checkbox.addEventListener("change", () => {
+			const isExclusiveGroup = p.group && p.group.includes("*");
 
-            if (p.index == noArthritisIndex && checkbox.checked) {
-              psaGroupBoxes.forEach(box => {
-                if (parseInt(box.value) !== noArthritisIndex) box.checked = false;
-              });
-            } else if (p.group === "PSA clasification" && checkbox.checked) {
-              noArthritisBox.checked = false;
-            } else if (p.group === "PSA clasification" && !checkbox.checked) {
-              const anyChecked = Array.from(psaGroupBoxes).some(box => parseInt(box.value) !== noArthritisIndex && box.checked);
-              if (!anyChecked) noArthritisBox.checked = true;
-            }
-          });
+			// ✅ Group-level exclusivity
+			if (isExclusiveGroup && checkbox.checked) {
+			  const allInGroup = document.querySelectorAll(`input[data-group="${p.group}"]`);
+			  allInGroup.forEach(box => {
+				if (box !== checkbox) box.checked = false;
+			  });
+			}
 
-          label.appendChild(checkbox);
-          label.append(" " + p.parameter);
-          section.appendChild(label);
-        });
+			// ✅ Parameter-level mutual exclusion using [tag]
+			const exclusionTag = getMutualExclusionTag(p.parameter);
+			if (exclusionTag && checkbox.checked) {
+			  document.querySelectorAll('input[type="checkbox"]').forEach(box => {
+				const idx = parseInt(box.value);
+				const otherParam = data[idx];
+				if (!otherParam) return;
 
-        groupDiv.appendChild(section);
-        container.appendChild(groupDiv);
-      });
+				const otherTag = getMutualExclusionTag(otherParam.parameter);
+				if (otherTag === exclusionTag && box !== checkbox) {
+				  box.checked = false;
+				}
+			  });
+			}
 
-      document.getElementById("searchParam").addEventListener("input", filterParams);
-    }
+			// ✅ PSA classification logic
+			const psaGroupBoxes = document.querySelectorAll('input[data-group="PSA clasification"]');
+			const noArthritisBox = document.querySelector(`input[value="${noArthritisIndex}"]`);
+
+			if (p.index == noArthritisIndex && checkbox.checked) {
+			  psaGroupBoxes.forEach(box => {
+				if (parseInt(box.value) !== noArthritisIndex) box.checked = false;
+			  });
+			} else if (p.group === "PSA clasification" && checkbox.checked) {
+			  noArthritisBox.checked = false;
+			} else if (p.group === "PSA clasification" && !checkbox.checked) {
+			  const anyChecked = Array.from(psaGroupBoxes).some(box => parseInt(box.value) !== noArthritisIndex && box.checked);
+			  if (!anyChecked) noArthritisBox.checked = true;
+			}
+		  });
+
+		  // ✅ Clean parameter display: remove [tag] from label
+		  const cleanLabel = p.parameter.replace(/\s*\[[^\]]+\]/, "");
+		  label.appendChild(checkbox);
+		  label.append(" " + cleanLabel);
+		  section.appendChild(label);
+		});
+
+		groupDiv.appendChild(section);
+		container.appendChild(groupDiv);
+	  });
+
+	  document.getElementById("searchParam").addEventListener("input", filterParams);
+	}
+
 
     function toggleAllGroups() {
       const sections = document.querySelectorAll(".group .checkboxes");
