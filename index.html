@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <title>בחירת טיפול בפסוריאזיס</title>
+  <title>Choose psoriasis treatment</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
@@ -94,23 +94,23 @@
   </style>
 </head>
 <body>
-  <div class="loader" id="loading">טוען נתונים...</div>
+  <div class="loader" id="loading">Loading...</div>
 
   <div class="container hidden" id="main">
-    <h2>מדריך בחירת טיפול לפסוריאזיס</h2>
+    <h2>Psoriasis Treatment Selection Guide</h2>
 
     <div class="toggle-controls">
-      <button onclick="toggleAllGroups()">📂 פתח הכל / סגור הכל</button>
-      <input type="text" id="searchParam" placeholder="חפש פרמטר...">
-      <button onclick="clearSelection()">נקה בחירה</button>
+      <button onclick="toggleAllGroups()">📂 Open all / Close all</button>
+      <input type="text" id="searchParam" placeholder="Search for parameter...">
+      <button onclick="clearSelection()">Clear all selections</button>
     </div>
 
     <div id="checkboxes"></div>
 
-    <button onclick="calculate()">חשב המלצות</button>
+    <button onclick="calculate()">Calculate Recommendations</button>
 
     <div class="param-list">
-      <h3>פרמטרים פעילים:</h3>
+      <h3>Active parameters:</h3>
       <ul id="activeParams"></ul>
     </div>
 
@@ -133,6 +133,41 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
+    function showMessage(type, text, autoHide = true) {
+	  const box = document.getElementById("customMessageBox");
+	  const content = document.getElementById("customMessageText");
+
+	  // Style by type
+	  if (type === "info") {
+		box.style.background = "#e8f0fe";
+		box.style.color = "#1a3d6d";
+		box.style.border = "1px solid #a1c2fa";
+	  } else if (type === "warning") {
+		box.style.background = "#fff3cd";
+		box.style.color = "#856404";
+		box.style.border = "1px solid #ffeeba";
+	  } else {
+		// default styling
+		box.style.background = "#f0f0f0";
+		box.style.color = "#333";
+		box.style.border = "1px solid #ccc";
+	  }
+
+	  content.textContent = text;
+	  box.style.display = "block";
+
+	  if (autoHide) {
+		setTimeout(() => {
+		  box.style.display = "none";
+		}, 6000);
+	  }
+	}
+ 
+	function getRelevanceTagFromMedName(medName) {
+	  const match = medName.match(/\^([^^]+)\^/);  // e.g., ^SP^
+	  return match ? match[1].trim() : null;
+	}
+
     function debugLog(msg) {
 	  const el = document.getElementById("debug");
 	  el.textContent += msg + "\n";
@@ -240,7 +275,9 @@
 		  });
 
 		  // ✅ Clean parameter display: remove [tag] from label
-		  const cleanLabel = p.parameter.replace(/\s*\[[^\]]+\]/, "");
+		  const cleanLabel = p.parameter
+			  .replace(/\s*\[[^\]]+\]/g, "")   // remove [M1], [lam], etc.
+			  .replace(/\s*\^[^^]+\^/g, "");   // remove ^SP^, ^IBD^, etc.
 		  label.appendChild(checkbox);
 		  label.append(" " + cleanLabel);
 		  section.appendChild(label);
@@ -299,7 +336,17 @@
 	function calculate() {
 	  const selected = Array.from(document.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
 	  activeParams = selected.map(i => ({ ...data[i], active: 1 }));
+	  // ✅ Check if one of the selected parameters includes "No arthritis"
+		const hasNoArthritisSelected = activeParams.some(p => p.parameter && p.parameter.includes("No arthritis"));
 
+		// ✅ Check if no parameters from severity or subtype categories are selected
+		const hasPsoriasisSeverity = activeParams.some(p => p.group && p.group.toLowerCase().includes("psoriasis severity"));
+		const hasPsoriasisSubtype = activeParams.some(p => p.group && p.group.toLowerCase().includes("psoriasis subtypes"));
+
+		if (hasNoArthritisSelected && !hasPsoriasisSeverity && !hasPsoriasisSubtype) {
+			showMessage("warning", "You must choose PSA classification or psoriasis severity or psoriasis subtype before calculating");
+			return;
+		}
 	  const scoringParams = activeParams.filter(p => !(p.group && p.group.includes("Treatment failure")));
 	  const treatmentFailureParams = activeParams.filter(p => p.group && p.group.includes("Treatment failure"));
 
@@ -325,47 +372,77 @@
 
 	  let results = [];
 
-	  medNames.forEach(med => {
-		const scores = adjustedParams.map(p => p.medications[med]).filter(s => s !== undefined);
-		if (scores.length === 0) return;
+		medNames.forEach(med => {
+		  const scores = adjustedParams.map(p => p.medications[med]).filter(s => s !== undefined);
+		  if (scores.length === 0) return;
 
-		let isContraindicated = scores.some(s => s < 0);
-		let finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
+		  let isContraindicated = scores.some(s => s < 0);
+		  let finalScore = isContraindicated ? Math.min(...scores) : Math.max(...scores);
 
-		// Treatment failure rule: if any score is -1, contraindicated
-		const failed = treatmentFailureParams.some(p => p.medications[med] === -1);
-		if (failed) {
-		  isContraindicated = true;
-		  finalScore = -1;
-		}
-
-		const countPositive = adjustedParams.filter(p => p.medications[med] > 0).length;
-
-		let weightedSum = adjustedParams.reduce((sum, p) => {
-		  const s = p.medications[med];
-		  return sum + (s > 0 ? s * p.weight : 0);
-		}, 0);
-
-		// Treatment failure multipliers
-		if (finalScore >= 0) {
-		  const multipliers = treatmentFailureParams
-			.map(p => Number(p.medications[med]))
-			.filter(val => !isNaN(val) && val > 0 && val < 1);
-
-		  if (multipliers.length > 1) {
-			finalScore = -1;
+		  // Treatment failure rule: if any score is -1, contraindicated
+		  const failed = treatmentFailureParams.some(p => p.medications[med] === -1);
+		  if (failed) {
 			isContraindicated = true;
-		  } else if (multipliers.length === 1) {
-			weightedSum *= multipliers[0];
+			finalScore = -1;
 		  }
-		}
 
-		if (isNaN(weightedSum) || isNaN(finalScore)) {
-		  console.error(`❗ Invalid score for ${med}: final=${finalScore}, weighted=${weightedSum}`);
-		}
+		  const countPositive = adjustedParams.filter(p => p.medications[med] > 0).length;
 
-		results.push({ med, finalScore, countPositive, weightedSum, isContraindicated });
-	  });
+		  let weightedSum = adjustedParams.reduce((sum, p) => {
+			const s = p.medications[med];
+			return sum + (s > 0 ? s * p.weight : 0);
+		  }, 0);
+
+		  // Treatment failure multipliers
+		  if (finalScore >= 0) {
+			const multipliers = treatmentFailureParams
+			  .map(p => Number(p.medications[med]))
+			  .filter(val => !isNaN(val) && val > 0 && val < 1);
+
+			if (multipliers.length > 1) {
+			  finalScore = -1;
+			  isContraindicated = true;
+			} else if (multipliers.length === 1) {
+			  weightedSum *= multipliers[0];
+			}
+		  }
+
+		  // ✅ Relevance enforcement based on ^TAG^ in medication name
+		  const relevanceTag = getRelevanceTagFromMedName(med);
+		  let reason = "";
+
+		  if (relevanceTag) {
+			const requiredParams = data.filter(p => p.parameter.includes(`^${relevanceTag}^`));
+			const allRequiredSelected = requiredParams.every(p =>
+			  activeParams.some(ap => ap.parameter === p.parameter)
+			);
+
+			if (!allRequiredSelected) {
+			  isContraindicated = true;
+			  finalScore = -1;
+			  weightedSum = 0; // for display in table
+
+			  const missingParams = requiredParams
+				.filter(p => !activeParams.some(ap => ap.parameter === p.parameter))
+				.map(p => p.parameter.replace(/\s*\^[^^]+\^/g, ""));
+
+			  reason = `This medication is relevant only if selecting the following: ${missingParams.join(", ")}`;
+			}
+		  }
+
+		  if (isNaN(weightedSum) || isNaN(finalScore)) {
+			console.error(`❗ Invalid score for ${med}: final=${finalScore}, weighted=${weightedSum}`);
+		  }
+
+		  results.push({
+			med,
+			finalScore,
+			countPositive,
+			weightedSum,
+			isContraindicated,
+			...(reason && { reason }) // only include tooltip reason if relevant
+		  });
+		});
 
 	  results.sort((a, b) => {
 		if (a.finalScore === -1 && b.finalScore !== -1) return 1;
@@ -377,13 +454,52 @@
 	  tbody.innerHTML = "";
 
 	  results.forEach(r => {
+
 		const row = document.createElement("tr");
-		row.innerHTML = `
-		  <td class="${r.isContraindicated ? 'red' : ''}">${r.med}</td>
-		  <td class="${r.isContraindicated ? 'red' : ''}">${r.finalScore}</td>
-		  <td>${r.countPositive}</td>
-		  <td>${r.weightedSum.toFixed(2)}</td>
-		`;
+		row.classList.toggle("selected-med", false);
+
+		// 🧠 Build medication name cell
+		const medCell = document.createElement("td");
+		medCell.className = r.isContraindicated ? 'red' : '';
+		medCell.textContent = r.med.replace(/\s*\^[^^]+\^/g, ""); // remove ^TAG^ from display
+
+		// ✅ If reason exists → show ℹ️ icon with click-to-explain
+		if (r.reason) {
+		  const infoIcon = document.createElement("span");
+		  infoIcon.textContent = " ℹ️";
+		  infoIcon.style.cursor = "pointer";
+		  infoIcon.style.marginRight = "6px";
+		  infoIcon.title = "לחץ להסבר";
+		  infoIcon.onclick = (e) => {
+			e.stopPropagation(); // prevent row click
+			showMessage("info", r.reason);
+
+		  };
+		  medCell.appendChild(infoIcon);
+		}
+
+		// Append the rest of the columns
+		const scoreCell = document.createElement("td");
+		scoreCell.className = r.isContraindicated ? 'red' : '';
+		scoreCell.textContent = r.finalScore;
+
+		const countCell = document.createElement("td");
+		countCell.textContent = r.countPositive;
+
+		const weightedCell = document.createElement("td");
+		weightedCell.textContent = r.weightedSum.toFixed(2);
+
+		// Add cells to row
+		row.appendChild(medCell);
+		row.appendChild(scoreCell);
+		row.appendChild(countCell);
+		row.appendChild(weightedCell);
+
+		// Click = highlight parameters
+		row.onclick = () => highlightParameters(r.med);
+		tbody.appendChild(row);
+
+
 		row.onclick = () => highlightParameters(r.med);
 		tbody.appendChild(row);
 	  });
@@ -419,7 +535,7 @@
 
 
     function drawChart(results) {
-      const labels = results.map(r => r.med);
+      const labels = results.map(r => r.med.replace(/\^.*?\^/g, "").trim());
       const scores = results.map(r => r.isContraindicated ? -5 : r.weightedSum);
       const colors = results.map(r => r.isContraindicated ? 'red' : 'blue');
 
@@ -458,6 +574,66 @@
     loadData();
   </script>
 <pre id="debug" style="background:#eee; padding:10px; font-size:12px; max-height:200px; overflow:auto;"></pre>
+<div id="tooltipPopup" style="
+  display: none;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+  padding: 16px 20px;
+  border-radius: 10px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+  max-width: 400px;
+  font-size: 15px;
+  z-index: 10000;
+">
+  <span id="tooltipText"></span>
+  <button onclick="document.getElementById('tooltipPopup').style.display='none'"
+    style="background: none; border: none; font-weight: bold; float: left; font-size: 18px; cursor: pointer; color: #999;">
+    ✖
+  </button>
+</div>
+<div id="warningBox" style="
+  display: none;
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
+  padding: 14px 18px;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  max-width: 400px;
+  font-size: 15px;
+  z-index: 10000;
+">
+  ⚠️ <span id="warningText"></span>
+  <button onclick="document.getElementById('warningBox').style.display='none'"
+    style="background: none; border: none; font-weight: bold; float: left; font-size: 18px; cursor: pointer; color: #856404;">
+    ✖
+  </button>
+</div>
+<div id="customMessageBox" style="
+  display: none;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+  max-width: 400px;
+  font-size: 15px;
+  z-index: 10000;
+">
+  <span id="customMessageText"></span>
+  <button onclick="document.getElementById('customMessageBox').style.display='none'"
+    style="background: none; border: none; font-weight: bold; float: left; font-size: 18px; cursor: pointer;">
+    ✖
+  </button>
+</div>
 
 </body>
 </html>
